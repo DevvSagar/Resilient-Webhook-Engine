@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.api.v1 import api_router
 
 
 @asynccontextmanager
@@ -76,3 +77,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Database connection failure: {str(e)}",
         )
+
+
+# Mount versioned API routes (/api/v1)
+app.include_router(api_router, prefix=settings.API_V1_STR)
