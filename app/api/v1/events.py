@@ -1,7 +1,7 @@
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.event import Event
 from app.schemas.event import EventCreate, EventResponse
+from app.services.dispatcher import dispatch_event
 
 router = APIRouter(prefix="/events", tags=["Events"])
 
@@ -22,6 +23,7 @@ router = APIRouter(prefix="/events", tags=["Events"])
 async def ingest_event(
     payload: EventCreate,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -81,6 +83,9 @@ async def ingest_event(
             status_code=status.HTTP_409_CONFLICT,
             detail="Conflict inserting event with given idempotency key.",
         )
+
+    # Trigger async webhook dispatcher in the background (non-blocking)
+    background_tasks.add_task(dispatch_event, event.id)
 
     return EventResponse(
         id=event.id,

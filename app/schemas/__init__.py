@@ -9,6 +9,9 @@ from app.schemas.event import (
     EventCreate,
     EventResponse,
 )
+from app.schemas.delivery import (
+    DeliveryResponse,
+)
 
 __all__ = [
     "SubscriptionCreate",
@@ -16,4 +19,5 @@ __all__ = [
     "SubscriptionUpdate",
     "EventCreate",
     "EventResponse",
+    "DeliveryResponse",
 ]
