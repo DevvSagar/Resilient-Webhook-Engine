@@ -1,11 +1,14 @@
 import uuid
 from datetime import datetime
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from sqlalchemy import DateTime, JSON, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.delivery import DeliveryAttempt
 
 
 class Event(Base):
@@ -18,7 +21,6 @@ class Event(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
         default=uuid.uuid4,
-        index=True,
     )
     idempotency_key: Mapped[str] = mapped_column(
         String(255),
@@ -39,6 +41,13 @@ class Event(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    # Relationships
+    delivery_attempts: Mapped[List["DeliveryAttempt"]] = relationship(
+        back_populates="event",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:

@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     DateTime,
@@ -15,6 +15,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.event import Event
+    from app.models.subscription import Subscription
 
 
 class DeliveryStatus(str, enum.Enum):
@@ -35,7 +39,6 @@ class DeliveryAttempt(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
         default=uuid.uuid4,
-        index=True,
     )
     event_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("events.id", ondelete="CASCADE"),
@@ -92,8 +95,8 @@ class DeliveryAttempt(Base):
     )
 
     # Relationships
-    event = relationship("Event", backref="delivery_attempts")
-    subscription = relationship("Subscription", backref="delivery_attempts")
+    event: Mapped["Event"] = relationship(back_populates="delivery_attempts")
+    subscription: Mapped["Subscription"] = relationship(back_populates="delivery_attempts")
 
     def __repr__(self) -> str:
         return (

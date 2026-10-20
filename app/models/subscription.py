@@ -1,12 +1,15 @@
 import secrets
 import uuid
 from datetime import datetime
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from sqlalchemy import Boolean, DateTime, JSON, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.delivery import DeliveryAttempt
 
 
 def generate_secret_key() -> str:
@@ -23,7 +26,6 @@ class Subscription(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
         default=uuid.uuid4,
-        index=True,
     )
     target_url: Mapped[str] = mapped_column(
         String(512),
@@ -54,6 +56,13 @@ class Subscription(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    # Relationships
+    delivery_attempts: Mapped[List["DeliveryAttempt"]] = relationship(
+        back_populates="subscription",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:
