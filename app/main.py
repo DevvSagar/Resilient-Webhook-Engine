@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import engine, get_db
 from app.api.v1 import api_router
 
 
@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print(f"🚀 Starting {settings.PROJECT_NAME}...")
     yield
     print(f"🛑 Shutting down {settings.PROJECT_NAME}...")
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -72,6 +73,8 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             "database": "connected",
             "service": settings.PROJECT_NAME,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
