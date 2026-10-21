@@ -44,7 +44,12 @@ class Settings(BaseSettings):
     # Webhook Engine Defaults
     DEFAULT_TIMEOUT_SECONDS: float = 5.0
     MAX_RETRY_ATTEMPTS: int = 5
+    MAX_BACKOFF_SECONDS: float = 300.0
     RATE_LIMIT_PER_MINUTE: int = 100
+
+    # Retry Worker Configuration
+    WORKER_POLL_INTERVAL_SECONDS: float = 5.0
+    WORKER_BATCH_SIZE: int = 50
 
 
 settings = Settings()
