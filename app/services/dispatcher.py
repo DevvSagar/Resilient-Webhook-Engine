@@ -1,4 +1,5 @@
 import json
+import random
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,41 @@ from app.core.security import generate_webhook_signature
 from app.models.delivery import DeliveryAttempt, DeliveryStatus
 from app.models.event import Event
 from app.models.subscription import Subscription
+
+
+def calculate_backoff_delay(attempt_number: int) -> float:
+    """
+    Calculates exponential backoff delay with randomized full jitter.
+    Formula: min(2^attempt + random(0.1, 1.0), MAX_BACKOFF_SECONDS).
+    Guaranteed never to exceed settings.MAX_BACKOFF_SECONDS.
+    """
+    base_delay = 2 ** attempt_number
+    jitter = random.uniform(0.1, 1.0)
+    return round(min(base_delay + jitter, settings.MAX_BACKOFF_SECONDS), 2)
+
+
+def _apply_failure_state(
+    attempt: DeliveryAttempt,
+    error_reason: str,
+    attempt_number: int,
+) -> None:
+    """
+    Evaluates retry eligibility against settings.MAX_RETRY_ATTEMPTS.
+    - If attempt < MAX_RETRY_ATTEMPTS: schedules next retry with jittered backoff.
+    - If attempt >= MAX_RETRY_ATTEMPTS: quarantines into Dead Letter Queue (status=FAILED).
+    """
+    if attempt_number < settings.MAX_RETRY_ATTEMPTS:
+        attempt.status = DeliveryStatus.RETRYING
+        delay = calculate_backoff_delay(attempt_number)
+        attempt.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        attempt.error_message = error_reason
+    else:
+        # Quarantined in Dead Letter Queue (DLQ)
+        attempt.status = DeliveryStatus.FAILED
+        attempt.next_retry_at = None
+        attempt.error_message = (
+            f"{error_reason} (Max {settings.MAX_RETRY_ATTEMPTS} retries exhausted. Moved to Dead Letter Queue)"
+        )
 
 
 async def deliver_to_subscription(
@@ -37,16 +73,20 @@ async def deliver_to_subscription(
     await db.commit()
     await db.refresh(attempt)
 
-    # 2. Prepare payload bytes and HMAC signature
+    # 2. Prepare payload bytes, timestamp, and HMAC signature
+    timestamp = int(time.time())
     payload_str = json.dumps(event.payload, separators=(",", ":"))
     signature_header = generate_webhook_signature(
         secret_key=subscription.secret_key,
         payload=payload_str,
+        timestamp=timestamp,
     )
 
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "RelayHook-Dispatcher/1.0",
+        "X-Webhook-Id": str(event.id),
+        "X-Webhook-Timestamp": str(timestamp),
         "X-Webhook-Signature": signature_header,
         "X-Event-Type": event.event_type,
         "X-Delivery-Attempt": str(attempt_number),
@@ -73,30 +113,32 @@ async def deliver_to_subscription(
                 attempt.next_retry_at = None
                 attempt.error_message = None
             else:
-                attempt.status = DeliveryStatus.RETRYING
-                attempt.error_message = f"Destination server responded with HTTP {resp.status_code}"
-                # Schedule retry: exponential backoff (2 ^ attempt_number seconds)
-                delay_seconds = 2 ** attempt_number
-                attempt.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+                _apply_failure_state(
+                    attempt=attempt,
+                    error_reason=f"Destination server responded with HTTP {resp.status_code}",
+                    attempt_number=attempt_number,
+                )
    
     except (httpx.TimeoutException, httpx.RequestError) as exc:
         # Network drop, connection timeout, or DNS resolution failure
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         attempt.latency_ms = round(latency_ms, 2)
-        attempt.status = DeliveryStatus.RETRYING
         attempt.response_status_code = None
-        attempt.error_message = f"Network connection error: {type(exc).__name__} - {str(exc)}"
-        delay_seconds = 2 ** attempt_number
-        attempt.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        _apply_failure_state(
+            attempt=attempt,
+            error_reason=f"Network connection error: {type(exc).__name__} - {str(exc)}",
+            attempt_number=attempt_number,
+        )
 
     except Exception as exc:
         # Fallback safeguard against any other unexpected exception
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         attempt.latency_ms = round(latency_ms, 2)
-        attempt.status = DeliveryStatus.RETRYING
-        attempt.error_message = f"Unexpected delivery error: {str(exc)}"
-        delay_seconds = 2 ** attempt_number
-        attempt.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        _apply_failure_state(
+            attempt=attempt,
+            error_reason=f"Unexpected delivery error: {str(exc)}",
+            attempt_number=attempt_number,
+        )
 
     await db.commit()
     await db.refresh(attempt)
