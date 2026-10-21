@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import engine, get_db
 from app.api.v1 import api_router
+from app.services.retry_worker import start_retry_worker, stop_retry_worker
 
 
 @asynccontextmanager
@@ -18,8 +19,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Executes startup and shutdown tasks.
     """
     print(f"🚀 Starting {settings.PROJECT_NAME}...")
+    # Start autonomous background retry worker loop
+    start_retry_worker()
+
     yield
+
     print(f"🛑 Shutting down {settings.PROJECT_NAME}...")
+    # Gracefully stop the retry worker before terminating DB connections
+    await stop_retry_worker()
     await engine.dispose()
 
 
