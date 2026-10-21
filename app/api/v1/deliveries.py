@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,7 +10,7 @@ from app.core.database import get_db
 from app.models.delivery import DeliveryAttempt, DeliveryStatus
 from app.models.event import Event
 from app.models.subscription import Subscription
-from app.schemas.delivery import DeliveryResponse
+from app.schemas.delivery import BulkReplayResponse, DeliveryResponse
 from app.services.dispatcher import deliver_to_subscription
 
 router = APIRouter(prefix="/deliveries", tags=["Deliveries"])
@@ -44,6 +45,85 @@ async def list_deliveries(
     query = query.order_by(DeliveryAttempt.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.get(
+    "/dlq",
+    response_model=List[DeliveryResponse],
+    summary="List quarantined Dead Letter Queue (DLQ) deliveries",
+)
+async def list_dlq_deliveries(
+    subscription_id: Optional[uuid.UUID] = Query(None, description="Filter DLQ by subscription ID"),
+    limit: int = Query(default=50, ge=1, le=100, description="Max logs to return"),
+    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns all permanently failed deliveries quarantined in the Dead Letter Queue.
+    Sorted in chronological FIFO order (oldest first).
+    """
+    query = select(DeliveryAttempt).where(DeliveryAttempt.status == DeliveryStatus.FAILED)
+    if subscription_id is not None:
+        query = query.where(DeliveryAttempt.subscription_id == subscription_id)
+
+    query = query.order_by(DeliveryAttempt.created_at.asc()).limit(limit).offset(offset)
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+@router.post(
+    "/dlq/replay-all",
+    response_model=BulkReplayResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Bulk replay quarantined Dead Letter Queue deliveries in FIFO order",
+)
+async def bulk_replay_dlq(
+    subscription_id: Optional[uuid.UUID] = Query(None, description="Replay DLQ for a specific subscription"),
+    limit: int = Query(default=100, ge=1, le=500, description="Max orders to queue for replay"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bulk replays quarantined Dead Letter Queue orders in chronological FIFO order.
+    Flips eligible FAILED rows to RETRYING with next_retry_at = NOW().
+    The autonomous background worker and Redis rate limiter safely deliver them.
+    """
+    query = select(DeliveryAttempt).where(DeliveryAttempt.status == DeliveryStatus.FAILED)
+
+    if subscription_id is not None:
+        sub_res = await db.execute(select(Subscription).where(Subscription.id == subscription_id))
+        sub = sub_res.scalar_one_or_none()
+        if not sub or not sub.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Specified subscription does not exist or is inactive.",
+            )
+        query = query.where(DeliveryAttempt.subscription_id == subscription_id)
+
+    # Strict FIFO ordering
+    query = query.order_by(DeliveryAttempt.created_at.asc()).limit(limit)
+    result = await db.execute(query)
+    failed_attempts = result.scalars().all()
+
+    if not failed_attempts:
+        return BulkReplayResponse(
+            message="No quarantined deliveries found matching criteria.",
+            replayed_count=0,
+            subscription_id=subscription_id,
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    for attempt in failed_attempts:
+        attempt.status = DeliveryStatus.RETRYING
+        attempt.next_retry_at = now_utc
+        attempt.error_message = "Replay initiated from Dead Letter Queue."
+
+    await db.commit()
+
+    return BulkReplayResponse(
+        message=f"Successfully queued {len(failed_attempts)} dead-letter deliveries for replay.",
+        replayed_count=len(failed_attempts),
+        subscription_id=subscription_id,
+    )
 
 
 @router.get(
