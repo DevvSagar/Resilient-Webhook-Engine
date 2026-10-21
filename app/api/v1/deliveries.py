@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.delivery import DeliveryAttempt, DeliveryStatus
+from app.models.event import Event
+from app.models.subscription import Subscription
 from app.schemas.delivery import DeliveryResponse
+from app.services.dispatcher import deliver_to_subscription
 
 router = APIRouter(prefix="/deliveries", tags=["Deliveries"])
 
@@ -66,3 +69,65 @@ async def get_delivery(
         )
 
     return delivery
+
+
+#  manually + 1 req at a time 
+@router.post(
+    "/{delivery_id}/replay",
+    response_model=DeliveryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Manually replay a failed or dead-letter delivery",
+)
+async def replay_delivery(
+    delivery_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Manually replays a failed delivery attempt from the Dead Letter Queue.
+    Resets the attempt counter to 1 and immediately dispatches the event.
+    """
+    query = select(DeliveryAttempt).where(DeliveryAttempt.id == delivery_id)
+    result = await db.execute(query)
+    old_delivery = result.scalar_one_or_none()
+
+    if not old_delivery:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Delivery attempt with ID '{delivery_id}' not found.",
+        )
+
+    if old_delivery.status == DeliveryStatus.SUCCESS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot replay an already successful delivery attempt.",
+        )
+
+    # Fetch parent Event
+    event_query = select(Event).where(Event.id == old_delivery.event_id)
+    event_res = await db.execute(event_query)
+    event = event_res.scalar_one_or_none()
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Associated event record not found.",
+        )
+
+    # Fetch parent Subscription
+    sub_query = select(Subscription).where(Subscription.id == old_delivery.subscription_id)
+    sub_res = await db.execute(sub_query)
+    subscription = sub_res.scalar_one_or_none()
+    if not subscription or not subscription.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target subscription is inactive or deleted.",
+        )
+
+    # Trigger fresh delivery attempt (attempt_number=1)
+    replayed_attempt = await deliver_to_subscription(
+        event=event,
+        subscription=subscription,
+        db=db,
+        attempt_number=1,
+    )
+
+    return replayed_attempt
