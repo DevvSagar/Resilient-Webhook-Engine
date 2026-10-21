@@ -47,9 +47,14 @@ class Settings(BaseSettings):
     MAX_BACKOFF_SECONDS: float = 300.0
     RATE_LIMIT_PER_MINUTE: int = 100
 
+    # Rate Limiter Configuration (Token Bucket)
+    DEFAULT_RATE_LIMIT_CAPACITY: int = 10
+    DEFAULT_RATE_LIMIT_REFILL_RATE: float = 5.0
+
     # Retry Worker Configuration
     WORKER_POLL_INTERVAL_SECONDS: float = 5.0
     WORKER_BATCH_SIZE: int = 50
+    DEFAULT_MAX_CONCURRENT_PER_SUBSCRIBER: int = 10
 
 
 settings = Settings()
