@@ -10,6 +10,7 @@ from app.schemas.event import (
     EventResponse,
 )
 from app.schemas.delivery import (
+    BulkReplayResponse,
     DeliveryResponse,
 )
 
@@ -20,4 +21,5 @@ __all__ = [
     "EventCreate",
     "EventResponse",
     "DeliveryResponse",
+    "BulkReplayResponse",
 ]

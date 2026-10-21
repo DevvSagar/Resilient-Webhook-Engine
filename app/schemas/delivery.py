@@ -26,3 +26,10 @@ class DeliveryResponse(BaseModel):
     next_retry_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+
+class BulkReplayResponse(BaseModel):
+    """Response returned when initiating a bulk replay from the Dead Letter Queue."""
+    message: str
+    replayed_count: int
+    subscription_id: Optional[uuid.UUID] = None
