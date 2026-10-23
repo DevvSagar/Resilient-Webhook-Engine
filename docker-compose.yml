@@ -31,6 +31,49 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: relayhook_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-webhook_db}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DEBUG: "False"
+      DEFAULT_TIMEOUT_SECONDS: "5.0"
+      MAX_RETRY_ATTEMPTS: "5"
+      MAX_BACKOFF_SECONDS: "300.0"
+      RATE_LIMIT_PER_MINUTE: "100"
+      DEFAULT_BURST_CAPACITY: "20"
+      DEFAULT_REFILL_RATE_PER_SEC: "5.0"
+      DEFAULT_MAX_CONCURRENT_PER_SUBSCRIBER: "10"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: relayhook_prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:

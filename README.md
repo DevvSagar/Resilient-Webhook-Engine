@@ -4,8 +4,9 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7.x-DC382D?logo=redis&logoColor=white)](https://redis.io/)
-[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0%20(Async)-red)](https://www.sqlalchemy.org/)
+[![Prometheus](https://img.shields.io/badge/Prometheus-v2.51-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Tests](https://img.shields.io/badge/Tests-7%20Passing-brightgreen?logo=pytest&logoColor=white)](https://docs.pytest.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **A fault-tolerant, horizontally scalable webhook delivery engine engineered to guarantee reliable, idempotent event transmission across distributed microservices under real-world network failure conditions.**
@@ -139,58 +140,52 @@ Standard naive HTTP dispatchers fail catastrophically in production due to:
 
 ---
 
-## 🚀 Quickstart & Local Installation
+## 🚀 Quickstart & Installation
 
-### Prerequisites
-* **Docker & Docker Compose** (for PostgreSQL and Redis)
-* **Python 3.11+**
-* **uv** (recommended) or standard `pip`
+### Option A: 1-Command Full-Stack Docker Deployment (Recommended) 🐳
 
-### 1. Clone the Repository
+Launch the entire distributed platform (FastAPI Engine, PostgreSQL 16, Redis 7, Prometheus Metrics, and auto-migrations) with a single command:
+
+```bash
+docker compose up --build -d
+```
+
+#### Live Endpoints:
+* **Interactive OpenAPI/Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
+* **Production Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
+* **Prometheus Metrics Exporter:** [http://localhost:8000/metrics](http://localhost:8000/metrics)
+* **Prometheus Web Dashboard:** [http://localhost:9090](http://localhost:9090)
+
+---
+
+### Option B: Local Development Setup (Virtual Environment) 💻
+
+#### 1. Clone the Repository & Configure Environment
 ```bash
 git clone https://github.com/your-username/relayhook.git
 cd relayhook
-```
-
-### 2. Environment Configuration
-Copy the provided `.env.example` into `.env`:
-```bash
 cp .env.example .env
 ```
 
-### 3. Spin Up Infrastructure
+#### 2. Spin Up Infrastructure
 Launch containerized PostgreSQL 16 and Redis 7:
 ```bash
-docker compose up -d
-```
-Verify containers are healthy:
-```bash
-docker ps
-# relayhook_postgres -> Up (healthy) on 0.0.0.0:5432
-# relayhook_redis    -> Up (healthy) on 0.0.0.0:6379
+docker compose up -d postgres redis
 ```
 
-### 4. Install Dependencies
+#### 3. Install Dependencies & Run Migrations
 Using `uv`:
 ```bash
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
-```
-
-### 5. Apply Database Migrations
-Run Alembic to create the schema with all indexes and foreign keys:
-```bash
 alembic upgrade head
 ```
 
-### 6. Start the Service
+#### 4. Start the Service
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
-* **Interactive OpenAPI/Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
-* **ReDoc Documentation:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
-* **Production Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
 
 ---
 
@@ -256,16 +251,15 @@ Celery/BullMQ are excellent task queues, but for an enterprise webhook infrastru
 
 ---
 
-## 🗺️ Roadmap & Future Enhancements
+## 🗺️ Completed Sprint Milestones & Capabilities
 
-- [x] High-throughput async ingestion with Pydantic v2 validation
-- [x] Strict DB-level idempotency key deduplication with race-condition rollback
-- [x] Cryptographic HMAC-SHA256 signature generator
-- [x] Full audit trail state machine (`PENDING`, `SUCCESS`, `RETRYING`, `FAILED`)
-- [ ] Redis token-bucket rate limiter per destination host
-- [ ] Automated exponential backoff background dispatch worker with jitter
-- [ ] Webhook Replay API (manual trigger for dead-lettered events)
-- [ ] OpenTelemetry distributed tracing and Prometheus metrics exporter
+- [x] **Day 1: Project Skeleton & Database Schema** — Async SQLAlchemy 2.0 models, PostgreSQL 16 migrations via Alembic.
+- [x] **Day 2: High-Throughput Ingestion & Deduplication** — Atomic DB-level idempotency key validation with race-condition rollback (`IntegrityError`).
+- [x] **Day 3: Cryptographic Security & Asynchronous Dispatcher** — HMAC-SHA256 signature generator (`X-Webhook-Signature`), replay-attack timestamps, and non-blocking delivery.
+- [x] **Day 4: Fault Tolerance, Retries & Dead Letter Queue (DLQ)** — Exponential backoff with full jitter, state tracking (`PENDING`, `SUCCESS`, `RETRYING`, `FAILED`), and autonomous background retry worker.
+- [x] **Day 5: Redis Token-Bucket Rate Limiter & Concurrency Governor** — Multi-tenant per-subscriber rate limiting, concurrency semaphores, and automated 5-scenario Pytest test suite.
+- [x] **Day 6: Observability, Distributed Tracing & Stress Testing** — Structured JSON logging, `X-Request-Id` context propagation, Prometheus metrics (`/metrics`), and 500-event chaos stress testing under 30% drop rates.
+- [x] **Day 7: Multi-Stage Docker & Full-Stack Orchestration** — Production `Dockerfile`, `docker-compose.yml` (FastAPI + PostgreSQL + Redis + Prometheus), auto-migration `entrypoint.sh`, and `render.yaml` 1-click cloud blueprint.
 
 ---
 
