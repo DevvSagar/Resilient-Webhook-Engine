@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -10,8 +11,17 @@ from app.core.config import settings
 from app.core.database import engine, get_db
 from app.core.redis import init_redis, close_redis, get_redis
 from app.api.v1 import api_router
+from app.observability import (
+    RequestTracingMiddleware,
+    get_metrics_response,
+    setup_logging,
+)
 from app.services.retry_worker import start_retry_worker, stop_retry_worker
 from redis.asyncio import Redis
+
+# Initialize structured logging engine
+setup_logging(log_level="DEBUG" if settings.DEBUG else "INFO")
+logger = logging.getLogger("relayhook.api")
 
 
 @asynccontextmanager
@@ -20,7 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Application lifecycle manager.
     Executes startup and shutdown tasks.
     """
-    print(f"🚀 Starting {settings.PROJECT_NAME}...")
+    logger.info("Starting RelayHook application...")
     # Initialize async Redis connection pool and verify connection
     await init_redis()
     # Start autonomous background retry worker loop
@@ -28,7 +38,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    print(f"🛑 Shutting down {settings.PROJECT_NAME}...")
+    logger.info("Shutting down RelayHook application...")
     # Gracefully stop the retry worker and Redis pool before terminating DB connections
     await stop_retry_worker()
     await close_redis()
@@ -53,6 +63,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Distributed Tracing & Latency Logging Middleware
+app.add_middleware(RequestTracingMiddleware)
 
 
 @app.get("/", tags=["Root"])
@@ -106,6 +119,15 @@ async def health_check(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Health check failure: {str(e)}",
         )
+
+
+@app.get("/metrics", tags=["Observability"])
+async def metrics():
+    """
+    Exposes Prometheus-formatted operational telemetry metrics.
+    Scraped by Prometheus and visualized in Grafana dashboards.
+    """
+    return get_metrics_response()
 
 
 # Mount versioned API routes (/api/v1)
