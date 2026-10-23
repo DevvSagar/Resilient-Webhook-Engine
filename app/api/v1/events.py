@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.event import Event
+from app.observability import record_event_ingestion
 from app.schemas.event import EventCreate, EventResponse
 from app.services.dispatcher import dispatch_event
 
@@ -42,6 +43,7 @@ async def ingest_event(
 
     if existing_event:
         # Idempotency hit: return existing event with 200 OK without re-processing
+        record_event_ingestion(event_type=existing_event.event_type, status="already_processed")
         response.status_code = status.HTTP_200_OK
         return EventResponse(
             id=existing_event.id,
@@ -86,6 +88,7 @@ async def ingest_event(
 
     # Trigger async webhook dispatcher in the background (non-blocking)
     background_tasks.add_task(dispatch_event, event.id)
+    record_event_ingestion(event_type=event.event_type, status="queued")
 
     return EventResponse(
         id=event.id,
