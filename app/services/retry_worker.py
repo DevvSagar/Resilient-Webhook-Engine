@@ -14,6 +14,7 @@ from app.core.redis import get_redis_client
 from app.models.delivery import DeliveryAttempt, DeliveryStatus
 from app.models.event import Event
 from app.models.subscription import Subscription
+from app.observability import record_rate_limit_throttle
 from app.services.dispatcher import deliver_to_subscription
 from app.services.rate_limiter import check_rate_limit
 
@@ -75,6 +76,7 @@ async def _dispatch_single_retry(old_attempt_id: uuid.UUID) -> bool:
         if not rate_result.allowed:
             # 🛑 Bucket is empty for this partner!
             # Do NOT fail the order. Politely postpone next_retry_at by retry_after seconds!
+            record_rate_limit_throttle(subscription.id)
             delay = max(0.5, rate_result.retry_after)
             old_attempt.next_retry_at = now_utc + timedelta(seconds=delay)
             old_attempt.error_message = (

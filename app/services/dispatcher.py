@@ -15,6 +15,7 @@ from app.core.security import generate_webhook_signature
 from app.models.delivery import DeliveryAttempt, DeliveryStatus
 from app.models.event import Event
 from app.models.subscription import Subscription
+from app.observability import record_delivery_attempt, track_in_flight_delivery
 
 
 def calculate_backoff_delay(attempt_number: int) -> float:
@@ -94,54 +95,62 @@ async def deliver_to_subscription(
 
     # 3. Fire the non-blocking HTTP POST request across the network
     start_time = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=settings.DEFAULT_TIMEOUT_SECONDS) as client:
-            resp = await client.post(
-                url=subscription.target_url,
-                content=payload_str,
-                headers=headers,
-            )
-            latency_ms = (time.perf_counter() - start_time) * 1000.0
-
-            attempt.latency_ms = round(latency_ms, 2)
-            attempt.response_status_code = resp.status_code
-            attempt.response_body = resp.text[:500] if resp.text else None
-
-            # Outcome Evaluation: 2xx Success vs 4xx/5xx Failure
-            if 200 <= resp.status_code < 300:
-                attempt.status = DeliveryStatus.SUCCESS
-                attempt.next_retry_at = None
-                attempt.error_message = None
-            else:
-                _apply_failure_state(
-                    attempt=attempt,
-                    error_reason=f"Destination server responded with HTTP {resp.status_code}",
-                    attempt_number=attempt_number,
+    with track_in_flight_delivery():
+        try:
+            async with httpx.AsyncClient(timeout=settings.DEFAULT_TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    url=subscription.target_url,
+                    content=payload_str,
+                    headers=headers,
                 )
-   
-    except (httpx.TimeoutException, httpx.RequestError) as exc:
-        # Network drop, connection timeout, or DNS resolution failure
-        latency_ms = (time.perf_counter() - start_time) * 1000.0
-        attempt.latency_ms = round(latency_ms, 2)
-        attempt.response_status_code = None
-        _apply_failure_state(
-            attempt=attempt,
-            error_reason=f"Network connection error: {type(exc).__name__} - {str(exc)}",
-            attempt_number=attempt_number,
-        )
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
 
-    except Exception as exc:
-        # Fallback safeguard against any other unexpected exception
-        latency_ms = (time.perf_counter() - start_time) * 1000.0
-        attempt.latency_ms = round(latency_ms, 2)
-        _apply_failure_state(
-            attempt=attempt,
-            error_reason=f"Unexpected delivery error: {str(exc)}",
-            attempt_number=attempt_number,
-        )
+                attempt.latency_ms = round(latency_ms, 2)
+                attempt.response_status_code = resp.status_code
+                attempt.response_body = resp.text[:500] if resp.text else None
+
+                # Outcome Evaluation: 2xx Success vs 4xx/5xx Failure
+                if 200 <= resp.status_code < 300:
+                    attempt.status = DeliveryStatus.SUCCESS
+                    attempt.next_retry_at = None
+                    attempt.error_message = None
+                else:
+                    _apply_failure_state(
+                        attempt=attempt,
+                        error_reason=f"Destination server responded with HTTP {resp.status_code}",
+                        attempt_number=attempt_number,
+                    )
+       
+        except (httpx.TimeoutException, httpx.RequestError) as exc:
+            # Network drop, connection timeout, or DNS resolution failure
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            attempt.latency_ms = round(latency_ms, 2)
+            attempt.response_status_code = None
+            _apply_failure_state(
+                attempt=attempt,
+                error_reason=f"Network connection error: {type(exc).__name__} - {str(exc)}",
+                attempt_number=attempt_number,
+            )
+
+        except Exception as exc:
+            # Fallback safeguard against any other unexpected exception
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            attempt.latency_ms = round(latency_ms, 2)
+            _apply_failure_state(
+                attempt=attempt,
+                error_reason=f"Unexpected delivery error: {str(exc)}",
+                attempt_number=attempt_number,
+            )
 
     await db.commit()
     await db.refresh(attempt)
+
+    # 4. Observe Prometheus metrics
+    record_delivery_attempt(
+        status=attempt.status.value,
+        latency_seconds=(attempt.latency_ms or 0.0) / 1000.0,
+    )
+
     return attempt
     
 
