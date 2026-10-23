@@ -1,0 +1,55 @@
+services:
+  # 🚀 RelayHook FastAPI Webhook Engine Service
+  - type: web
+    name: relayhook-api
+    runtime: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: POSTGRES_SERVER
+        fromDatabase:
+          name: relayhook-postgres
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: relayhook-postgres
+          property: port
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: relayhook-postgres
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: relayhook-postgres
+          property: password
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: relayhook-postgres
+          property: database
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: relayhook-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: relayhook-redis
+          property: port
+
+  # ⚡ Redis In-Memory Token Bucket Rate Limiter
+  - type: redis
+    name: relayhook-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+
+# 🐘 Managed PostgreSQL Database
+databases:
+  - name: relayhook-postgres
+    plan: free
+    region: oregon
+    databaseName: webhook_db
+    user: postgres
